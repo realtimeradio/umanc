@@ -31,43 +31,43 @@ entity basic_fifo is
 	);
 	port (
 		clk             : in std_logic;
-	    reset           : in std_logic;
-	    din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    we              : in std_logic;
-	    re              : in std_logic;
-	    dout            : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    full            : out std_logic;
-	    empty           : out std_logic
+		reset           : in std_logic;
+		din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		we              : in std_logic;
+		re              : in std_logic;
+		dout            : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		full            : out std_logic;
+		empty           : out std_logic
 	);
 end basic_fifo;
 
 architecture behav of basic_fifo is
 
-	-- function called clogb2 that returns an integer which has the   
-	-- value of the ceiling of the log base 2.                              
-	function clogb2 (bit_depth : integer) return integer is                  
-		variable depth  : integer := bit_depth;                               
-		variable count  : integer := 1;                                       
-	begin                                                                   
+	-- function called clogb2 that returns an integer which has the
+	-- value of the ceiling of the log base 2.
+	function clogb2 (bit_depth : integer) return integer is
+		variable depth  : integer := bit_depth;
+		variable count  : integer := 1;
+	begin
 		for clogb2 in 1 to bit_depth loop  -- Works for up to 32 bit integers
 			if (bit_depth <= 2) then
-				count := 1;                                                      
-			else                                                               
-	        	if(depth <= 1) then
-	        		count := count;                                                
-				else                                                             
-					depth := depth / 2;                                            
-					count := count + 1;                                            
-				end if;                                                          
-	 	   end if;                                                            
-		end loop;                                                             
-		return(count);        	                                              
-	end;    
+				count := 1;
+			else
+	        		if(depth <= 1) then
+					count := count;
+				else
+					depth := depth / 2;
+					count := count + 1;
+				end if;
+			end if;
+		end loop;
+		return(count);
+	end;
 
-    constant C_FIFO_DEPTH_BITS : integer := clogb2(G_DEPTH);
+	constant C_FIFO_DEPTH_BITS : integer := clogb2(G_DEPTH);
 
-    type memory_type is array (0 to G_DEPTH-1) of std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-    signal memory : memory_type := (others => (others => '0'));
+	type memory_type is array (0 to G_DEPTH-1) of std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+	signal memory : memory_type := (others => (others => '0'));
 	signal writeptr : integer := 0;
 	signal readptr : integer := 0;
 	signal fifo_full : std_logic := '0';

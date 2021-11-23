@@ -12,15 +12,15 @@ entity slv_to_axi_stream_master is
 		G_FIFO_DEPTH	: integer	:= 16
 	);
 	port (
-	    -- Input vector
-	    din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    din_valid       : in std_logic;
+		-- Input vector
+		din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		din_valid       : in std_logic;
 		-- AXI Master Bus Interface MAXIS
-		maxis_aclk	    : in std_logic;
-		maxis_aresetn	: in std_logic;
-		maxis_tvalid	: out std_logic;
-		maxis_tdata	    : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-		maxis_tready	: in std_logic
+		maxis_aclk      : in std_logic;
+		maxis_aresetn   : in std_logic;
+		maxis_tvalid    : out std_logic;
+		maxis_tdata     : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		maxis_tready    : in std_logic
 	);
 end slv_to_axi_stream_master;
 
