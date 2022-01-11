@@ -12,15 +12,15 @@ entity slv_to_axi_stream_master is
 		G_FIFO_DEPTH	: integer	:= 16
 	);
 	port (
-		-- Input vector
-		din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-		din_valid       : in std_logic;
+	    -- Input vector
+	    din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+	    din_valid       : in std_logic;
 		-- AXI Master Bus Interface MAXIS
-		maxis_aclk      : in std_logic;
-		maxis_aresetn   : in std_logic;
-		maxis_tvalid    : out std_logic;
-		maxis_tdata     : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-		maxis_tready    : in std_logic
+		maxis_aclk	    : in std_logic;
+		maxis_aresetn	: in std_logic;
+		maxis_tvalid	: out std_logic;
+		maxis_tdata	    : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		maxis_tready	: in std_logic
 	);
 end slv_to_axi_stream_master;
 
@@ -45,8 +45,17 @@ architecture behav of slv_to_axi_stream_master is
 	
 	signal fifo_empty : std_logic;
 	signal fifo_full  : std_logic;
+	signal fifo_re    : std_logic;
+	signal maxis_tvalid_int : std_logic;
+	signal maxis_areset : std_logic;
 
 begin
+
+	maxis_areset <= not maxis_aresetn;
+
+	maxis_tvalid <= maxis_tvalid_int;
+ 	maxis_tvalid_int <= not fifo_empty;           -- VALID goes high as soon as data is available, regardless of READY
+ 	fifo_re <= maxis_tready and maxis_tvalid_int; -- Transaction only occurs on READY and VALID
 
 	basic_fifo_inst : basic_fifo
 		generic map (
@@ -55,18 +64,13 @@ begin
 		)
 		port map (
 			clk => maxis_aclk,
-			reset => maxis_aresetn,
+			reset => maxis_areset,
 			din => din,
 			we => din_valid,
-			re => maxis_tready,
+			re => fifo_re,
 			dout => maxis_tdata,
 			full => fifo_full,
 			empty => fifo_empty
 		);
-		
-	process(maxis_aclk)
-	begin
-		maxis_tvalid <= fifo_empty and maxis_tready;
-	end process;
 
 end behav;
