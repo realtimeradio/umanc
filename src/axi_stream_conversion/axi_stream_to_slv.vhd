@@ -4,7 +4,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity axi_stream_master_to_slv is
+entity axi_stream_to_slv is
 	generic (
 		-- Number of bytes in input vector and output AXI data stream.
 		G_WIDTH_BYTES	: integer	:= 4;
@@ -12,19 +12,19 @@ entity axi_stream_master_to_slv is
 		G_FIFO_DEPTH	: integer	:= 16
 	);
 	port (
-	    -- Output vector
-	    dout             : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    dout_valid       : out std_logic;
+		-- Output vector
+		dout            : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		dout_valid      : out std_logic;
 		-- AXI Slave Bus Interface SAXIS
 		saxis_aclk	    : in std_logic;
-		saxis_aresetn	: in std_logic;
-		saxis_tvalid	: in std_logic;
+		saxis_aresetn	  : in std_logic;
+		saxis_tvalid	  : in std_logic;
 		saxis_tdata	    : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-		saxis_tready	: out std_logic
+		saxis_tready	  : out std_logic
 	);
-end axi_stream_master_to_slv;
+end axi_stream_to_slv;
 
-architecture behav of axi_stream_master_to_slv is
+architecture behav of axi_stream_to_slv is
 
 	component basic_fifo is
 		generic (
@@ -55,11 +55,11 @@ begin
 
 	saxis_areset <= not saxis_aresetn;
 
-    -- read-enable: output whenever FIFO contains data
+	-- read-enable: output whenever FIFO contains data
 	re <= not fifo_empty;
 	
 	-- AXI handshake
-	ready <= not fifo_full;
+	ready <= not fifo_full and not saxis_areset;
 	we <= ready and saxis_tvalid; -- Transaction only occurs on READY and VALID
 	saxis_tready <= ready;        -- Receiver can control ready independently of VALID
 	
@@ -79,11 +79,6 @@ begin
 			empty => fifo_empty
 		);
 
-	dout_valid <= re;
---	-- Compensate for 1 cycle latency
---	process(saxis_aclk)
---	begin
---		dout_valid <= re;
---	end process;
+	dout_valid <= not fifo_empty;
 
 end behav;

@@ -1,10 +1,8 @@
--- Turn a 
-
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity slv_to_axi_stream_master is
+entity slv_to_axi_stream is
 	generic (
 		-- Number of bytes in input vector and output AXI data stream.
 		G_WIDTH_BYTES	: integer	:= 4;
@@ -12,24 +10,24 @@ entity slv_to_axi_stream_master is
 		G_FIFO_DEPTH	: integer	:= 16
 	);
 	port (
-	    -- Input vector
-	    din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    din_valid       : in std_logic;
+		-- Input vector
+		din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		din_valid       : in std_logic;
 		-- AXI Master Bus Interface MAXIS
-		maxis_aclk	    : in std_logic;
-		maxis_aresetn	: in std_logic;
-		maxis_tvalid	: out std_logic;
-		maxis_tdata	    : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-		maxis_tready	: in std_logic
+		maxis_aclk      : in std_logic;
+		maxis_aresetn   : in std_logic;
+		maxis_tready    : in std_logic;
+		maxis_tvalid    : out std_logic;
+		maxis_tdata     : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0)
 	);
-end slv_to_axi_stream_master;
+end slv_to_axi_stream;
 
-architecture behav of slv_to_axi_stream_master is
+architecture behav of slv_to_axi_stream is
 
 	component basic_fifo is
 		generic (
-			G_WIDTH_BYTES	: integer;
-			G_DEPTH	        : integer
+			G_WIDTH_BYTES   : integer;
+			G_DEPTH	      : integer
 		);
 		port (
 			clk             : in std_logic;
