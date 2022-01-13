@@ -31,13 +31,13 @@ entity basic_fifo is
 	);
 	port (
 		clk             : in std_logic;
-	    reset           : in std_logic;
-	    din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    we              : in std_logic;
-	    re              : in std_logic;
-	    dout            : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-	    full            : out std_logic;
-	    empty           : out std_logic
+		reset           : in std_logic;
+		din             : in std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		we              : in std_logic;
+		re              : in std_logic;
+		dout            : out std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+		full            : out std_logic;
+		empty           : out std_logic
 	);
 end basic_fifo;
 
@@ -53,24 +53,24 @@ architecture behav of basic_fifo is
 			if (bit_depth <= 2) then
 				count := 1;                                                      
 			else                                                               
-	        	if(depth <= 1) then
-	        		count := count;                                                
+				if(depth <= 1) then
+					count := count;                                                
 				else                                                             
 					depth := depth / 2;                                            
 					count := count + 1;                                            
 				end if;                                                          
-	 	   end if;                                                            
-		end loop;                                                             
-		return(count);        	                                              
+			end if;                                                            
+		end loop;                                                       
+	return(count);        	                                              
 	end;    
 
-    constant C_FIFO_DEPTH_BITS : integer := clogb2(G_DEPTH);
+	constant C_FIFO_DEPTH_BITS : integer := clogb2(G_DEPTH);
 
-    type memory_type is array (0 to G_DEPTH-1) of std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
-    signal memory : memory_type := (others => (others => '0'));
-	signal writeptr : integer := 0;
-	signal readptr : integer := 0;
-	signal fifo_full : std_logic := '0';
+	type memory_type is array (0 to G_DEPTH-1) of std_logic_vector(8*G_WIDTH_BYTES - 1 downto 0);
+	signal memory : memory_type := (others => (others => '0'));
+	signal writeptr   : integer range 0 to G_DEPTH := 0;
+	signal readptr    : integer range 0 to G_DEPTH := 0;
+	signal fifo_full  : std_logic := '0';
 	signal fifo_empty : std_logic := '0';
 	signal word_count : unsigned(C_FIFO_DEPTH_BITS-1 downto 0) := (others => '0');
 
