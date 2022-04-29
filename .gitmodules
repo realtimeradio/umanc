@@ -1,0 +1,9 @@
+[submodule "souk/mlib_devel"]
+	path = souk/mlib_devel
+	url = https://github.com/realtimeradio/mlib_devel.git
+[submodule "souk/casperfpga"]
+	path = souk/casperfpga
+	url = https://github.com/realtimeradio/casperfpga
+[submodule "souk/device-tree-xlnx"]
+	path = souk/device-tree-xlnx
+	url = https://github.com/realtimeradio/device-tree-xlnx.git
