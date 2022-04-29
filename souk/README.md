@@ -1,3 +1,12 @@
+### Obtaining Source Code
+
+```
+git clone https://github.com/realtimeradio/umanc
+cd umanc
+git submodule init
+git submodule update
+```
+
 ### Software versions
 
  - Python 3.8
