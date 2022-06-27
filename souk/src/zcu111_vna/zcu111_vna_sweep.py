@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 
+import os
 import time
 import argparse
 import casperfpga
@@ -24,12 +25,6 @@ def norm_wave(ts, max_amp=2**15-1):
     dacQ = ((ts.imag/norm)*max_amp).astype("int16")
     return dacI, dacQ
 
-def load_dac(fpga, I, Q):
-    I = np.array(I, dtype='>h')
-    Q = np.array(Q, dtype='>h')
-    fpga.write('dac_wave_i', I.tobytes())
-    fpga.write('dac_wave_q', Q.tobytes())
-
 def make_cw(npoint, sample_hz, wave_hz):
     sample_period = 1./sample_hz
     t = np.arange(npoint) * sample_period
@@ -37,97 +32,183 @@ def make_cw(npoint, sample_hz, wave_hz):
     c = np.cos(2 * np.pi * wave_hz * t)
     return c + 1j*s
 
-def set_freq_by_index(fpga, i, sample_hz=SAMPLE_HZ, npoint=NPOINT):
-    wave_hz = sample_hz / npoint * i
-    print('Uploading CW at %.3f MHz' % (wave_hz / 1e6))
-    wave = make_cw(npoint, sample_hz, wave_hz)
-    I, Q = norm_wave(wave)
-    load_dac(fpga, I, Q)
+class Zcu111Vna:
+    def __init__(self, host, fpgfile, lmk_file=LMK_FILE, lmx_file=LMX_FILE):
+        self.host = host
+        print('Connecting to board: %s' % host)
+        self.fpga = casperfpga.CasperFpga(host, transport=casperfpga.KatcpTransport)
+        self._parse_fpg(fpgfile)
+        self.sample_hz = SAMPLE_HZ
+        self.fpga_clk_mhz = SAMPLE_HZ / FPGA_DEMUX_FACTOR / 1e6
 
-def wait_for_acc(fpga):
-    time.sleep(0.2) # placeholder
-    return
+    def _parse_fpg(self, fpgfile):
+        self.fpgfile = fpgfile
+        print('Parsing %s' % fpgfile)
+        self.fpga.get_system_information(fpgfile)
+        self.rfdc = self.fpga.adcs['rfdc']
 
-def read_acc(fpga, name='acc_r0'):
-    a = 0
-    n_reg = ACC_OUT_BITS // 32
-    for i in range(n_reg):
-        a += (fpga.read_uint('%s_out%d' % (name, i)) << (32*i))
-    max_val = 2**(ACC_OUT_BITS - 1) - 1
-    if a > max_val:
-        a -= 2**ACC_OUT_BITS
-    return a
-
-def trigger_acc(fpga):
-    fpga.write_int('new_acc_trig', 0)
-    fpga.write_int('new_acc_trig', 1)
-    fpga.write_int('new_acc_trig', 0)
-
-def get_new_acc(fpga):
-    trigger_acc(fpga)
-    wait_for_acc(fpga)
-    re = 0
-    im = 0
-    for i in range(FPGA_DEMUX_FACTOR):
-        re += read_acc(fpga, name='acc_r%d' % i)
-        im += read_acc(fpga, name='acc_i%d' % i)
-    return re + 1j*im
-
-def init(host='', program=False, fpgfile=None, loopback=False, acc_len=DEFAULT_ACC_LEN):
-    if fpgfile is None:
-        print('Must supply a .fpg file with the --fpgfile flag')
-        exit()
-
-    print('Connecting to board: %s' % host)
-    fpga = casperfpga.CasperFpga(host, transport=casperfpga.KatcpTransport)
-
-    if program:
+    def program(self, fpgfile=None):
+        fpgfile = fpgfile or self.fpgfile
         print('Programming with %s' % fpgfile)
-        fpga.upload_to_ram_and_program(fpgfile)
+        self.fpga.upload_to_ram_and_program(fpgfile)
         print('Initializing RFDC')
-        fpga.adcs['rfdc'].init(lmk_file=LMK_FILE, lmx_file=LMX_FILE)
+        self.fpga.adcs['rfdc'].init(lmk_file=LMK_FILE, lmx_file=LMX_FILE)
+        self._parse_fpg(fpgfile)
 
-    print('Parsing %s' % fpgfile)
-    fpga.get_system_information(fpgfile)
-    rfdc = fpga.adcs['rfdc']
+    def enable_loopback(self):
+        print('Enabling DAC->ADC internal loopback')
+        self.fpga.write_int('adc_dac_loopback', 1)
 
-    fpga_clk_mhz = fpga.estimate_fpga_clock()
-    print('FPGA board clock: %.2f MHz' % fpga_clk_mhz)
-    rfdc.status()
+    def disable_loopback(self):
+        print('Disabling DAC->ADC internal loopback')
+        self.fpga.write_int('adc_dac_loopback', 0)
 
-    print('Setting loopback mode:', loopback)
-    fpga.write_int('adc_dac_loopback', int(loopback))
+    def get_fpga_clk(self):
+        fpga_clk_mhz = self.fpga.estimate_fpga_clock()
+        print('FPGA board clock: %.2f MHz' % fpga_clk_mhz)
+        return fpga_clk_mhz
 
-    print('Setting accumulation length to %d samples' % acc_len)
-    print('%d samples ~= %.2f ms' % (acc_len, acc_len / fpga_clk_mhz / 1e3))
-    fpga.write_int('acc_len', acc_len)
+    def get_rfdc_status(self):
+        self.rfdc.status()
 
-    return fpga
+    def get_acc_len(self):
+        return self.fpga.read_uint('acc_len')
+
+    def set_acc_len_spectra(self, acc_len=DEFAULT_ACC_LEN):
+        print('Setting accumulation length to %d samples' % acc_len)
+        print('%d samples ~= %.2f ms' % (acc_len, acc_len / self.fpga_clk_mhz / 1e3))
+        self.fpga.write_int('acc_len', acc_len)
+
+    def set_acc_len_ms(self, acc_len=100):
+        fpga_period_hz = 1./(self.fpga_clk_mhz * 1e6)
+        acc_len_spectra = int(acc_len*1e-3 / fpga_period_hz)
+        self.set_acc_len_spectra(acc_len_spectra)
+
+    def wait_for_acc(self, timeout=5):
+        t0 = time.time()
+        while not self.fpga.read_uint('acc_ready'):
+            if time.time() > t0 + timeout:
+                print("Timed out waiting for new accumulation!")
+                break
+            time.sleep(0.005)
+
+    def _read_acc(self, name='acc_r0'):
+        a = 0
+        n_reg = ACC_OUT_BITS // 32
+        for i in range(n_reg):
+            a += (self.fpga.read_uint('%s_out%d' % (name, i)) << (32*i))
+        max_val = 2**(ACC_OUT_BITS - 1) - 1
+        if a > max_val:
+            a -= 2**ACC_OUT_BITS
+        return a
+
+    def trigger_acc(self):
+        self.fpga.write_int('new_acc_trig', 0)
+        self.fpga.write_int('new_acc_trig', 1)
+        self.fpga.write_int('new_acc_trig', 0)
+
+    def get_new_acc(self):
+        self.trigger_acc()
+        self.wait_for_acc()
+        re = 0
+        im = 0
+        for i in range(FPGA_DEMUX_FACTOR):
+            re += self._read_acc(name='acc_r%d' % i)
+            im += self._read_acc(name='acc_i%d' % i)
+        return re + 1j*im
+
+class Zcu111VnaLut(Zcu111Vna):
+    def load_dac(self, I, Q):
+        I = np.array(I, dtype='>h')
+        Q = np.array(Q, dtype='>h')
+        self.fpga.write('dac_wave_i', I.tobytes())
+        self.fpga.write('dac_wave_q', Q.tobytes())
+
+    def set_freq_by_index(self, i, sample_hz=SAMPLE_HZ, npoint=NPOINT):
+        wave_hz = sample_hz / npoint * i
+        print('Uploading CW at %.3f MHz' % (wave_hz / 1e6))
+        wave = make_cw(npoint, sample_hz, wave_hz)
+        I, Q = norm_wave(wave)
+        self.load_dac(I, Q)
+
+class Zcu111VnaCordic(Zcu111Vna):
+    def set_freq(self, freq_hz):
+        assert freq_hz < self.sample_hz/2. # This probably isn't quite the right test
+        samples_per_cycle = self.sample_hz / freq_hz
+        phase_inc = 1./samples_per_cycle * FPGA_DEMUX_FACTOR
+        self.fpga.write_int('phase_inc', int(phase_inc * 2**23))
 
 def main():
     parser = argparse.ArgumentParser(
         description='Perform an RF sweep using a ZCU111 board',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('-l', dest='loopback', action='store_true',
+    parser.add_argument('--loopback', action='store_true',
                         help ='Use internal DAC->ADC loopback')
+    parser.add_argument('--lut', dest='lut', action='store_true',
+                        help ='Use LUT version of firmware')
     parser.add_argument('-p','--program', action='store_true',
                         help='Program FPGAs')
     parser.add_argument('-f','--fpgfile', type=str, default=None,
                         help='Path to .fpg firmware file')
-    parser.add_argument('-a','--acc_len', type=int, default=DEFAULT_ACC_LEN,
-                        help='Accumulation length in FPGA clocks')
+    parser.add_argument('-a','--acc_len', type=int, default=100,
+                        help='Accumulation length in milliseconds')
     parser.add_argument('--host', type=str, default='zcu111',
                         help='IP / hostname of ZCU111 board')
+    parser.add_argument('--sweep', type=str, default=None,
+                        help='sweep_start_hz,sweep_stop_hz,sweep_step_hz')
+    parser.add_argument('--plot', action='store_true',
+                        help='If set, and sweep parameters given, plot results')
+    parser.add_argument('--outfile', type=str, default=None,
+                        help='If set, save output to a CSV file with the given name (plus timestamp)')
     args = parser.parse_args()
 
-    init(
-        host = args.host,
-        program = args.program,
-        fpgfile = args.fpgfile,
-        loopback = args.loopback,
-        acc_len = args.acc_len,
-    )
+    if args.lut:
+        z = Zcu111VnaLut(args.host, args.fpgfile)
+    else:
+        z = Zcu111VnaCordic(args.host, args.fpgfile)
+
+    if args.program:
+        z.program()
+
+    if args.loopback:
+        z.enable_loopback()
+    else:
+        z.disable_loopback()
+
+    z.set_acc_len_ms(args.acc_len)
+
+    if args.sweep is not None:
+        if args.lut:
+            raise NotImplementedError('Sweep mode only supported for CORDIC firmware')
+        start, stop, step = map(int, args.sweep.split(','))
+        freqs = np.arange(start, stop, step, dtype=int)
+        n_freqs = freqs.shape[0]
+        v = np.zeros(n_freqs, dtype=complex)
+        for ff, freq in enumerate(freqs):
+            print('Setting DAC to %d Hz' % freq)
+            z.set_freq(freq)
+            time.sleep(0.001) # Probably not necessary
+            v[ff] = z.get_new_acc()
+        if args.plot:
+            plt.subplot(2,1,1)
+            plt.plot(freqs/1e6, np.abs(v))
+            plt.xlabel('Frequency [MHz]')
+            plt.ylabel('Abs(S12)')
+            plt.subplot(2,1,2)
+            plt.plot(freqs/1e6, np.angle(v))
+            plt.xlabel('Frequency [MHz]')
+            plt.ylabel('Angle(S12)')
+            plt.show()
+        if args.outfile is not None:
+            fname = args.outfile + '_%s.csv' % time.ctime().replace(' ', '_')
+            if os.path.exists(fname):
+                print('Path %s exists! Not saving output' % fname)
+            else:
+                with open(fname, 'w') as fh:
+                    fh.write('#Frequency [Hz], S12\n')
+                    for i in range(n_freqs):
+                        fh.write('%d,%d%+dj\n' % (freqs[i], v[i].real, v[i].imag))
 
 if __name__ == '__main__':
     main()
