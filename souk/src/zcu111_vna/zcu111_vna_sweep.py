@@ -11,7 +11,7 @@ LMK_FILE = "122M88_PL_122M88_SYSREF_7M68_clk5_12M8.txt"
 LMX_FILE = "LMX_REF_122M88_OUT_245M76.txt"
 
 DEFAULT_ACC_LEN = 200000
-SAMPLE_HZ = 3932160000 // 8
+SAMPLE_HZ = 3932160000
 NPOINT = 2**18
 FPGA_DEMUX_FACTOR = 2 # ADC samples per FPGA clock tick
 ACC_OUT_BITS = 64
@@ -38,8 +38,27 @@ class Zcu111Vna:
         print('Connecting to board: %s' % host)
         self.fpga = casperfpga.CasperFpga(host, transport=casperfpga.KatcpTransport)
         self._parse_fpg(fpgfile)
-        self.sample_hz = SAMPLE_HZ
-        self.fpga_clk_mhz = SAMPLE_HZ / FPGA_DEMUX_FACTOR / 1e6
+        try:
+            self._get_firmware_config()
+        except:
+            pass # Probably not programmed
+
+    def _get_firmware_config(self):
+        devlist = self.fpga.listdev()
+        if 'n_samples' in devlist:
+            self.n_samples = self.fpga.read_uint('n_samples')
+        else:
+            self.n_samples = 0
+        if 'n_parallel' in devlist:
+            self.n_parallel = self.fpga.read_uint('n_parallel')
+        else:
+            self.n_parallel = FPGA_DEMUX_FACTOR
+        self.sample_hz = SAMPLE_HZ // 8 * self.n_parallel // 2
+        self.fpga_clk_mhz = self.sample_hz / self.n_parallel / 1e6
+        print('Firmware config detected: %d sample RAM buffer' % self.n_samples)
+        print('Firmware config detected: %d ADC/DAC demux' % self.n_parallel)
+        print('Firmware config detected: %.2f MHz FPGA clock' % self.fpga_clk_mhz)
+        print('Firmware config detected: %.2f MHz ADC clock' % (self.sample_hz / 1e6))
 
     def _parse_fpg(self, fpgfile):
         self.fpgfile = fpgfile
@@ -54,6 +73,7 @@ class Zcu111Vna:
         print('Initializing RFDC')
         self.fpga.adcs['rfdc'].init(lmk_file=LMK_FILE, lmx_file=LMX_FILE)
         self._parse_fpg(fpgfile)
+        self._get_firmware_config()
 
     def enable_loopback(self):
         print('Enabling DAC->ADC internal loopback')
@@ -90,7 +110,7 @@ class Zcu111Vna:
             if time.time() > t0 + timeout:
                 print("Timed out waiting for new accumulation!")
                 break
-            time.sleep(0.005)
+            time.sleep(0.001)
 
     def _read_acc(self, name='acc_r0'):
         a = 0
@@ -105,16 +125,22 @@ class Zcu111Vna:
     def trigger_acc(self):
         self.fpga.write_int('new_acc_trig', 0)
         self.fpga.write_int('new_acc_trig', 1)
-        self.fpga.write_int('new_acc_trig', 0)
 
     def get_new_acc(self):
+        t0 = time.time()
         self.trigger_acc()
         self.wait_for_acc()
         re = 0
         im = 0
-        for i in range(FPGA_DEMUX_FACTOR):
+        if self.n_parallel > 2:
+            n_reg = 1
+        else:
+            n_reg = self.n_parallel
+        for i in range(n_reg):
             re += self._read_acc(name='acc_r%d' % i)
             im += self._read_acc(name='acc_i%d' % i)
+        t1 = time.time()
+        #print('Integration took %.2f ms' % ((t1 - t0) * 1000))
         return re + 1j*im
 
 class Zcu111VnaLut(Zcu111Vna):
@@ -124,8 +150,8 @@ class Zcu111VnaLut(Zcu111Vna):
         self.fpga.write('dac_wave_i', I.tobytes())
         self.fpga.write('dac_wave_q', Q.tobytes())
 
-    def set_freq_by_index(self, i, sample_hz=SAMPLE_HZ, npoint=NPOINT):
-        wave_hz = sample_hz / npoint * i
+    def set_freq_by_index(self, i, npoint=NPOINT):
+        wave_hz = self.sample_hz / npoint * i
         print('Uploading CW at %.3f MHz' % (wave_hz / 1e6))
         wave = make_cw(npoint, sample_hz, wave_hz)
         I, Q = norm_wave(wave)
@@ -135,7 +161,8 @@ class Zcu111VnaCordic(Zcu111Vna):
     def set_freq(self, freq_hz):
         assert freq_hz < self.sample_hz/2. # This probably isn't quite the right test
         samples_per_cycle = self.sample_hz / freq_hz
-        phase_inc = 1./samples_per_cycle * FPGA_DEMUX_FACTOR
+        phase_inc = 1./samples_per_cycle * 2 # units of PI
+        #print('phase_inc: %.2f' % phase_inc)
         self.fpga.write_int('phase_inc', int(phase_inc * 2**23))
 
 def main():
@@ -182,11 +209,12 @@ def main():
         if args.lut:
             raise NotImplementedError('Sweep mode only supported for CORDIC firmware')
         start, stop, step = map(int, args.sweep.split(','))
+        print('Seeping from %d Hz to %d Hz in steps of %d Hz' % (start, stop, step))
         freqs = np.arange(start, stop, step, dtype=int)
         n_freqs = freqs.shape[0]
         v = np.zeros(n_freqs, dtype=complex)
         for ff, freq in enumerate(freqs):
-            print('Setting DAC to %d Hz' % freq)
+            print('Setting DAC to %d kHz' % (freq / 1000.))
             z.set_freq(freq)
             time.sleep(0.001) # Probably not necessary
             v[ff] = z.get_new_acc()
