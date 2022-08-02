@@ -2,6 +2,7 @@
 
 import os
 import time
+import struct
 import argparse
 import casperfpga
 from matplotlib import pyplot as plt
@@ -74,6 +75,8 @@ class Zcu111Vna:
         self.fpga.adcs['rfdc'].init(lmk_file=LMK_FILE, lmx_file=LMX_FILE)
         self._parse_fpg(fpgfile)
         self._get_firmware_config()
+        if self.n_parallel > 2:
+            self.fpga.write_int('phase_inc_rst', 1)
 
     def enable_loopback(self):
         print('Enabling DAC->ADC internal loopback')
@@ -110,7 +113,7 @@ class Zcu111Vna:
             if time.time() > t0 + timeout:
                 print("Timed out waiting for new accumulation!")
                 break
-            time.sleep(0.001)
+            time.sleep(0.0002)
 
     def _read_acc(self, name='acc_r0'):
         a = 0
@@ -126,19 +129,27 @@ class Zcu111Vna:
         self.fpga.write_int('new_acc_trig', 0)
         self.fpga.write_int('new_acc_trig', 1)
 
-    def get_new_acc(self):
+    def get_new_acc(self, man_trig=None):
         t0 = time.time()
-        self.trigger_acc()
+        if man_trig:
+            self.trigger_acc()
+        elif man_trig is None and self.n_parallel <=2:
+            self.trigger_acc()
         self.wait_for_acc()
         re = 0
         im = 0
         if self.n_parallel > 2:
             n_reg = 1
+            d = self.fpga.read('acc_d', 2*8)
+            re, im = struct.unpack('>2q', d)
+            #for i in range(n_reg):
+            #    re += self._read_acc(name='acc_r%d' % i)
+            #    im += self._read_acc(name='acc_i%d' % i)
         else:
             n_reg = self.n_parallel
-        for i in range(n_reg):
-            re += self._read_acc(name='acc_r%d' % i)
-            im += self._read_acc(name='acc_i%d' % i)
+            for i in range(n_reg):
+                re += self._read_acc(name='acc_r%d' % i)
+                im += self._read_acc(name='acc_i%d' % i)
         t1 = time.time()
         #print('Integration took %.2f ms' % ((t1 - t0) * 1000))
         return re + 1j*im
@@ -178,7 +189,7 @@ def main():
                         help='Program FPGAs')
     parser.add_argument('-f','--fpgfile', type=str, default=None,
                         help='Path to .fpg firmware file')
-    parser.add_argument('-a','--acc_len', type=int, default=100,
+    parser.add_argument('-a','--acc_len', type=float, default=100,
                         help='Accumulation length in milliseconds')
     parser.add_argument('--host', type=str, default='zcu111',
                         help='IP / hostname of ZCU111 board')
@@ -216,7 +227,7 @@ def main():
         for ff, freq in enumerate(freqs):
             print('Setting DAC to %d kHz' % (freq / 1000.))
             z.set_freq(freq)
-            time.sleep(0.001) # Probably not necessary
+            #time.sleep(0.0005) # Probably not necessary
             v[ff] = z.get_new_acc()
         if args.plot:
             plt.subplot(2,1,1)
