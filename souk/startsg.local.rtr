@@ -4,3 +4,4 @@ export PLATFORM=lin64
 export JASPER_BACKEND=vitis
 export XLNX_DT_REPO_PATH=/home/jackh/src/umanc/souk/device-tree-xlnx
 export LD_PRELOAD=${LD_PRELOAD}:"/usr/lib/x86_64-linux-gnu/libexpat.so"
+export CASPER_VENV_ON_START=~/casper-python3.8-venv
